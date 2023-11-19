@@ -8,12 +8,13 @@ import Pkg;
 
 Pkg.add(url="https://github.com/CliMA/ClimaOcean.jl.git"); Pkg.instantiate                           # Oceananigans"); Pkg.add("CairoMakie") 
 
+#Pkg.add("Oceananigans")
 #Pkg.add(url="https://github.com/CliMA/Oceananigans.jl.git"); Pkg.instantiate
-Pkg.add(url="https://github.com/CliMA/Oceananigans.jl"); Pkg.instantiate
+#Pkg.add(url="https://github.com/CliMA/Oceananigans.jl"); Pkg.instantiate
 
 
 
-Pkg.add("GLMakie"); Pkg.add("JLD2")
+Pkg.add("GLMakie"); Pkg.add("JLD2"); Pkg.add("CUDA")
 
 
 
@@ -30,16 +31,18 @@ Nx = 128
 Ny = 60
 Nz = 12
 
+
+Lz = 3600
+
 σ = 1.15
 Δz(k) = Lz * (σ - 1) * σ^(Nz - k) / σ^(Nz - 1)
 z_faces(k) = k == 1 ? - Lz : -Lz + sum(Δz.(1:k-1))
 
-Lz = 3600
 
 underlying_grid = LatitudeLongitudeGrid(arch, size = (Nx, Ny, Nz), longitude = (-180, 180), latitude = (-84.375, 84.375), z=z_faces)
 
 bathymetry = jldopen("bathymetry_juliacon.jld2")["bathymetry"]
-surface(bathymetry * 0.001)
+#surface(bathymetry * 0.001)
 
 grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
 
@@ -95,10 +98,53 @@ v_top_bc = FluxBoundaryCondition(τy)
 end
 
 # video 1:33
-T_top_bc = FluxBoundaryCondition(restoring_T, discrete_form = true, parameters = (Ts = Ts, λ = 0.001))
+#T_top_bc = FluxBoundaryCondition(restoring_T, discrete_form = true, parameters = (Ts = Ts, λ = 0.001))
 
 # https://clima.github.io/OceananigansDocumentation/stable/model_setup/boundary_conditions/
-u_bcs = FieldBoundaryConditions(top = u_top_bc)
-v_bcs = FieldBoundaryConditions(top = v_top_bc)
-T_top_bc = FieldBoundaryConditions(top = T_top_bc)
+#u_bcs = FieldBoundaryConditions(top = u_top_bc)
+#v_bcs = FieldBoundaryConditions(top = v_top_bc)
+
+# from sim_ocean001    >
+u_bottom_bc = FluxBoundaryCondition(u_linear_drag, discrete_form=true, parameters = 0.01)
+v_bottom_bc = FluxBoundaryCondition(v_linear_drag, discrete_form=true, parameters = 0.01) 
+u_bcs = FieldBoundaryConditions(top = u_top_bc, bottom = u_bottom_bc); v_bcs = FieldBoundaryConditions(top = v_top_bc, bottom = v_bottom_bc);
+
+T_top_bc = FluxBoundaryCondition(restoring_T, discrete_form = true, parameters = (Ts = Ts, λ = 0.001))
+T_bcs = FieldBoundaryConditions(top = T_top_bc) #<
+
+
+#T_top_bc = FieldBoundaryConditions(top = T_top_bc)
+
+
+
+#boundary_conditions = (u = u_bcs, v = v_bcs, T = T_top_bc)
+
+##### Model!
+model = HydrostaticFreeSurfaceModel(;   grid,
+                                        coriolis,
+                                        #free_surface = ImplicitFreeSurface(), #<- from sim_ocean001.jl
+                                        buoyancy,
+                                        tracers = (:T, :S),
+                                        closure,
+                                        #boundary_conditions
+                                        boundary_conditions = (u = u_bcs, v = v_bcs, T = T_bcs)) # sim_ocean001        
+                                        
+#=
+
+in sim_ocean001.jl  this model initialization ran:
+grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry)); coriolis = HydrostaticSphericalCoriolis(); buoyancy = SeawaterBuoyancy(); closure = (horizontal_diffusivity, vertical_diffusivity, convective_adjustment)
+u_bcs = FieldBoundaryConditions(top = u_top_bc, bottom = u_bottom_bc); v_bcs = FieldBoundaryConditions(top = v_top_bc, bottom = v_bottom_bc); T_bcs = FieldBoundaryConditions(top = T_top_bc)
+
+model = HydrostaticFreeSurfaceModel(; grid,
+                                      coriolis,
+                                      free_surface = ImplicitFreeSurface(),
+                                      buoyancy,
+                                      tracers = (:T, :S),
+                                      #tracer_advection = WENO5(grid),
+                                      closure = (vertical_diffusion, horizontal_diffusion, convective_adjustment),
+                                      boundary_conditions = (u = u_bcs, v = v_bcs, T = T_bcs))
+                                      
+
+
+=#
 
